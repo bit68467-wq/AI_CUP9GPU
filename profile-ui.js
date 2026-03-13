@@ -1733,7 +1733,9 @@ export function renderProfile(container, user, session){
   `;
   container.appendChild(settingsCard);
 
-  // Convert GPU points to withdrawable dollars: allow user to pick points (min 1000, multiples of 100), 1000 pts = $1.
+  // Convert GPU points to withdrawable dollars: 1000 pts = $1, minimum 1000 pts.
+  // The handler reads points from CUP9_TASK_POINTS_<email>, converts whole multiples of 1000,
+  // deducts points, credits CUP9_EARNINGS (withdrawable), appends a transaction and notifies UI.
   (function wireConvertPoints(){
     try{
       // small delay to ensure DOM nodes appended
@@ -1747,7 +1749,7 @@ export function renderProfile(container, user, session){
             cbtn.id = 'btn-convert-points';
             cbtn.className = 'btn';
             cbtn.textContent = 'Converti Punti GPU';
-            cbtn.title = 'Converti i tuoi punti GPU in $ (minimo 1000 punti, multipli di 100)';
+            cbtn.title = 'Converti i tuoi punti GPU in $ (1000 pts = $1), minimo 1000 pts';
             // append to settings card controls area if exists, otherwise to settingsCard
             if(controls) controls.appendChild(cbtn);
             else settingsCard.appendChild(cbtn);
@@ -1776,36 +1778,22 @@ export function renderProfile(container, user, session){
                 return;
               }
 
-              // Prompt user to choose how many points to convert (min 1000, multiples of 100)
-              let input = window.prompt(`Quanti punti vuoi convertire? (minimo 1000, multipli di 100). Hai ${pts} punti.`, '1000');
-              if(input === null) return; // cancelled
-              input = String(input || '').replace(/[^\d]/g,'').trim();
-              if(!input) { toastMessage('Valore non valido'); return; }
-              const chosen = Number(input);
-              if(Number.isNaN(chosen) || chosen < 1000){
-                toastMessage('Devi inserire un numero >= 1000');
+              // compute how many full conversion units
+              const units = Math.floor(pts / 1000);
+              if(units <= 0){
+                toastMessage('Nessuna unità convertibile (multipli di 1000 punti).', { type:'info' });
                 return;
               }
-              if(chosen > pts){
-                toastMessage('Non hai abbastanza punti per questa conversione');
-                return;
-              }
-              if(chosen % 100 !== 0){
-                toastMessage('Inserisci un valore multiplo di 100 punti (es. 1000, 1100, 1200...)');
-                return;
-              }
-
-              // compute dollars: 1000 pts = $1
-              const dollars = Number((chosen / 1000).toFixed(8));
+              const dollars = Number(units * 1); // 1000 pts = $1
 
               // Ask confirmation with concise summary
-              const ok = window.confirm(`Convertire ${chosen} punti GPU → $${dollars.toFixed(8)} e accreditare immediatamente ai guadagni prelevabili?`);
+              const ok = window.confirm(`Convertire ${units * 1000} punti GPU → $${dollars.toFixed(2)} e accreditare immediatamente ai guadagni prelevabili?`);
               if(!ok) return;
 
               // Durable update: deduct points (idempotent) and credit CUP9_EARNINGS
               try{
                 // Deduct points
-                const newPts = Math.max(0, pts - chosen);
+                const newPts = Math.max(0, pts - units * 1000);
                 localStorage.setItem(pointsKey, String(newPts));
 
                 // Credit withdrawable earnings map
@@ -1829,7 +1817,7 @@ export function renderProfile(container, user, session){
                   created_at: new Date().toISOString(),
                   status: 'accredited',
                   email: em,
-                  meta: { from_points: true, points_deducted: chosen, units_converted: chosen / 1000 }
+                  meta: { from_points: true, points_deducted: units * 1000, units: units }
                 };
                 txs.push(tx);
                 localStorage.setItem(TX_KEY, JSON.stringify(txs));
@@ -1849,7 +1837,7 @@ export function renderProfile(container, user, session){
                 try{ notify('tasks:points:changed', { email: em, points: Number(newPts) }); }catch(e){}
                 try{ notify('balance:withdrawable:changed', { email: em, withdrawable: earnings[em] }); }catch(e){}
                 try{ notify('tx:changed', txs); }catch(e){}
-                toastMessage(`Convertiti ${chosen} punti → $${dollars.toFixed(8)} accreditati ai guadagni prelevabili`, { type:'success' });
+                toastMessage(`Convertiti ${units * 1000} punti → $${dollars.toFixed(2)} accreditati ai guadagni prelevabili`, { type:'success' });
               }catch(e){
                 console.error('convert points apply error', e);
                 toastMessage('Errore convertendo i punti', { type:'error' });
